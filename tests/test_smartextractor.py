@@ -1,15 +1,15 @@
 """
 SmartExtractor Tests
 """
+import logging
 
 import pytest
-import tempfile
-import os
 from pathlib import Path
 
 from smartextractor import SmartExtractor, ExtractionConfig
-from smartextractor.exceptions import SmartExtractorError, PDFNotFoundError
+from smartextractor.exceptions import PDFNotFoundError
 
+logger = logging.getLogger(__name__)
 
 class TestSmartExtractor:
     """SmartExtractor Test Class"""
@@ -61,8 +61,43 @@ class TestSmartExtractor:
         """Test get supported languages"""
         extractor = SmartExtractor()
         languages = extractor.get_supported_languages()
-        
         assert isinstance(languages, list)
+
+    def test_two_columns_pdf(self):
+        config = ExtractionConfig(
+            enable_ocr=False,
+            enable_layout_detection=True,
+            language="en",
+            confidence_threshold=0.1,
+            remove_headers_footers=False
+        )
+        extractor = SmartExtractor(config)
+        pdf_file = "examples/patent2.pdf"
+        context = extractor.extract_text(str(pdf_file))
+        logger.info(f"{pdf_file} read result: {context}")
+        print(f"{pdf_file} read result: {context}")
+        assert len(context) > 0
+
+
+    def test_read_pdf_file(self):
+        """Test custom config initialization"""
+        config = ExtractionConfig(
+            enable_ocr=True,
+            enable_layout_detection=True,
+            language="en",
+            confidence_threshold=0.8
+        )
+        extractor = SmartExtractor(config)
+        user_files_dir = Path(__file__).parent.parent / "examples"
+        # 查找目录中所有的 PDF 文件
+        pdf_files = list(user_files_dir.glob("*.pdf"))
+        assert len(pdf_files) > 0, f"No PDF files found in {user_files_dir}"
+
+        logger.info(f"\nFound {len(pdf_files)} PDF files to test.")
+
+        for pdf_file in pdf_files:
+            context = extractor.extract_text(str(pdf_file))
+            logger.info(f"\t{pdf_file}: {context}")
 
 
 class TestExtractionConfig:

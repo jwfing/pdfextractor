@@ -70,8 +70,13 @@ class TextProcessor:
                 if block.block_type not in ['header', 'footer']
             ]
         
-        # Regenerate text
-        result.text = "\n\n".join(page.text for page in result.pages if page.text)
+        # Regenerate text from all text_blocks
+        all_text = []
+        for page in result.pages:
+            for block in page.text_blocks:
+                if block.text:
+                    all_text.append(block.text)
+        result.text = "\n".join(all_text)
         
         return result
     

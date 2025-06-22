@@ -279,8 +279,23 @@ class SmartExtractor:
     
     def _merge_results(self, pages: List[PageResult], metadata: Dict[str, Any]) -> ExtractionResult:
         """Merge results from all pages"""
-        # Merge text
-        all_text = "\n\n".join(page.text for page in pages if page.text)
+        # Merge text from all text_blocks, not page.text
+        all_text = []
+        logger.info(f"Merging results from {len(pages)} pages")
+        
+        for i, page in enumerate(pages):
+            logger.info(f"Page {i+1}: {len(page.text_blocks)} text blocks")
+            for j, block in enumerate(page.text_blocks):
+                if block.text:
+                    logger.info(f"  Block {j+1}: '{block.text[:50]}...' (length: {len(block.text)})")
+                    all_text.append(block.text)
+                else:
+                    logger.warning(f"  Block {j+1}: empty text")
+        
+        merged_text = "\n".join(all_text)
+        logger.info(f"Final merged text length: {len(merged_text)}")
+        if merged_text:
+            logger.info(f"First 100 chars: '{merged_text[:100]}...'")
         
         # Merge tables
         all_tables = []
@@ -293,7 +308,7 @@ class SmartExtractor:
             all_images.extend(page.images)
         
         return ExtractionResult(
-            text=all_text,
+            text=merged_text,
             pages=pages,
             tables=all_tables,
             images=all_images,

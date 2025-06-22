@@ -157,10 +157,12 @@ class PDFProcessor:
         try:
             # Use pdfplumber to extract text blocks
             chars = page.chars
+            logger.info(f"Found {len(chars) if chars else 0} characters on page")
             
             if not chars:
                 # If no character information, try to extract text
                 text = page.extract_text()
+                logger.info(f"Extracted text using extract_text(): {text[:200] if text else 'None'}")
                 if text:
                     text_objects.append(TextObject(
                         text=text,
@@ -170,8 +172,9 @@ class PDFProcessor:
             
             # Group characters by font and position
             char_groups = self._group_chars_by_font(chars)
+            logger.info(f"Grouped into {len(char_groups)} character groups")
             
-            for group in char_groups:
+            for i, group in enumerate(char_groups):
                 if not group:
                     continue
                 
@@ -194,6 +197,11 @@ class PDFProcessor:
                     is_bold=font_info.get('is_bold', False),
                     is_italic=font_info.get('is_italic', False)
                 ))
+                
+                if i < 5:  # Log first 5 text objects for debugging
+                    logger.info(f"Text object {i}: '{text[:50]}...' at bbox {bbox}")
+            
+            logger.info(f"Created {len(text_objects)} text objects")
                 
         except Exception as e:
             logger.warning(f"Error extracting text objects: {e}")
