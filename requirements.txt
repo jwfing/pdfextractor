@@ -1,0 +1,31 @@
+# PDF processor
+PyPDF2>=3.0.0
+pdfplumber>=0.8.0
+pdf2image>=1.16.0
+
+# OCR
+Pillow>=9.0.0
+opencv-python>=4.5.0
+pytesseract>=0.3.10
+easyocr>=1.6.0
+
+# Machine Learning and AI
+numpy>=1.21.0
+scikit-learn>=1.0.0
+tensorflow>=2.8.0
+torch>=1.12.0
+transformers>=4.20.0
+
+# NLP
+nltk>=3.7
+spacy>=3.4.0
+
+# Data
+pandas>=1.4.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Toots
+click>=8.0.0
+tqdm>=4.64.0
+loguru>=0.6.0 
