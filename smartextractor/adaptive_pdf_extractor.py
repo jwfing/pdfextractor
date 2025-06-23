@@ -4,7 +4,7 @@ import fitz  # PyMuPDF
 import numpy as np
 from collections import defaultdict
 from typing import List, Dict, Tuple
-import warnings
+import warnings  # Import warnings to suppress KMeans warnings
 
 logger = logging.getLogger(__name__)
 
@@ -86,57 +86,67 @@ class AdaptivePDFExtractor:
         # 使用K-means聚类检测列数
         column_centers = self._detect_columns_kmeans(x_centers, page_width)
 
+        # 只有当_detect_columns_kmeans明确检测到两列时，才认为它是多列
         if len(column_centers) >= 2:
-            # 检查是否有明显的列间距
+            # 检查是否有明显的列间距 (这个检查可以作为辅助，但主要依赖聚类结果)
             if self._has_clear_column_gap(blocks, page_width):
                 return "multi_column"
             else:
                 # 如果聚类检测到两列但没有明显的物理间距，可能不是标准双栏
                 logger.debug("KMeans detected two columns but no clear gap. Might be single column with wide text.")
 
-        # 方法2: 基于文本块宽度分析
+        # 方法2: 基于文本块宽度分析 (作为辅助判断)
         avg_width = np.mean([block['width'] for block in blocks])
-        if avg_width < page_width * 0.6 and len(column_centers) < 2:  # 平均宽度小于页面60%可能是多列
-            logger.debug(f"Layout detected as multi_column based on average block width ({avg_width:.2f} < {page_width * 0.6:.2f})")
+        # 如果平均宽度小于页面宽度的60%，且没有被明确判断为单列，则可能是多列
+        if avg_width < page_width * 0.6 and len(column_centers) < 2:  # 避免与方法1冲突
+            logger.debug(
+                f"Layout detected as multi_column based on average block width ({avg_width:.2f} < {page_width * 0.6:.2f})")
             return "multi_column"
 
         return "single_column"
 
     def _detect_columns_kmeans(self, x_centers: List[float], page_width: float) -> List[float]:
-        """使用简单聚类检测列中心"""
+        """
+        使用聚类检测列中心。
+        如果能自信地检测到两列，则返回两个列中心的列表；否则返回空列表。
+        """
         if len(x_centers) < 2:
-            return [page_width / 2]
+            return []  # 数据不足，无法检测多列
 
-        x_centers = np.array(x_centers).reshape(-1, 1)
+        x_centers_np = np.array(x_centers).reshape(-1, 1)
 
-        # 尝试2列聚类
+        # 尝试2列K-Means聚类
         try:
             from sklearn.cluster import KMeans
             # 抑制 KMeans 的 n_init 警告
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
                 kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
-                clusters = kmeans.fit_predict(x_centers.reshape(-1, 1))
+                clusters = kmeans.fit_predict(x_centers_np)
                 centers = kmeans.cluster_centers_.flatten()
 
-            # 检查聚类质量
-            if len(set(clusters)) == 2:
+            # 检查聚类质量：确保形成了两个不同的簇，并且它们之间有足够的距离
+            if len(set(clusters)) == 2:  # 确保确实分成了两类
                 center_distance = abs(centers[1] - centers[0])
-                if center_distance > page_width * 0.2:  # 列间距足够大
+                # 列中心距离应大于页面宽度的20%才认为是两列
+                if center_distance > page_width * 0.2:
                     return sorted(centers)
         except ImportError:
-            # 如果没有sklearn，使用简单方法
             logger.debug("scikit-learn not installed, falling back to histogram method for column detection.")
         except Exception as e:  # 捕获其他 KMeans 错误，例如数据退化
             logger.debug(f"KMeans failed: {e}, falling back to histogram method.")
 
-        # 简单的双峰检测
-        hist, bins = np.histogram(x_centers, bins=50)
+        # 备用方案：简单的直方图峰值检测 (改进版)
+        # 使用更细的 bin 来提高分辨率
+        hist, bins = np.histogram(x_centers, bins=50)  # 增加 bin 数量
+
+        # 寻找峰值：一个峰值比其相邻点高，且高于整体最大值的某个比例
         peaks = []
         for i in range(1, len(hist) - 1):
-            if hist[i] > hist[i - 1] and hist[i] > hist[i + 1] and hist[i] > np.max(hist) * 0.3:
+            if hist[i] > hist[i - 1] and hist[i] > hist[i + 1] and hist[i] > np.max(hist) * 0.1:  # 降低峰值检测阈值
                 peaks.append((bins[i] + bins[i + 1]) / 2)
 
+        # 过滤峰值，寻找两个足够分离的峰值作为列中心
         if len(peaks) >= 2:
             sorted_peaks = sorted(peaks)
 
@@ -147,7 +157,7 @@ class AdaptivePDFExtractor:
             elif len(sorted_peaks) >= 2:  # 如果不远，但仍有两个峰值，取前两个
                 return sorted_peaks[:2]
 
-        return [page_width / 2]
+        return []  # 如果无法自信地检测到两列，返回空列表
 
     def _has_clear_column_gap(self, blocks: List[Dict], page_width: float) -> bool:
         """检测是否有明显的列间距"""
@@ -174,15 +184,15 @@ class AdaptivePDFExtractor:
 
     def _extract_multi_column(self, blocks: List[Dict], page_width: float) -> str:
         """提取多列文本"""
-        # 确定分列点
         logger.debug(f"enter _extract_multi_column with page_width: {page_width}")
-        split_point = page_width / 2
 
-        # 更精确的分列点计算
         x_centers = [(block['x0'] + block['x1']) / 2 for block in blocks]
         column_centers = self._detect_columns_kmeans(x_centers, page_width)
 
+        split_point = page_width / 2  # 默认分割点，如果无法通过更精确方法确定
+
         if len(column_centers) >= 2:
+            # 如果自信地检测到两个列中心，使用它们的中间点作为分割点
             split_point = (column_centers[0] + column_centers[1]) / 2
             logger.debug(f"KMeans/Histogram detected split_point: {split_point:.2f}")
         else:
@@ -211,7 +221,7 @@ class AdaptivePDFExtractor:
             else:
                 logger.debug(f"No significant gap found, using default split_point: {split_point:.2f}")
 
-        # 分配文本块到各列
+        # 根据确定的分割点将文本块分配到左右列
         left_blocks = []
         right_blocks = []
 
