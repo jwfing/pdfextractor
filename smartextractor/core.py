@@ -281,11 +281,8 @@ class SmartExtractor:
         """Merge results from all pages"""
         # Merge text from all text_blocks, not page.text
         all_text = []
-        logger.info(f"Merging results from {len(pages)} pages")
-        
+
         for i, page in enumerate(pages):
-            logger.info(f"Page {i+1}: {len(page.text_blocks)} text blocks")
-            
             # Check if this page has been processed for multi-column layout
             # If so, we need to preserve the column grouping
             if hasattr(page, '_column_processed') and page._column_processed:
@@ -296,28 +293,22 @@ class SmartExtractor:
                 for j, block in enumerate(page.text_blocks):
                     if block.text:
                         page_text_blocks.append(block.text)
-                        logger.info(f"  Block {j+1}: '{block.text[:50]}...' (length: {len(block.text)})")
                     else:
                         logger.warning(f"  Block {j+1}: empty text")
                 
                 # Join all text blocks from this page
                 page_text = "\n".join(page_text_blocks)
                 all_text.append(page_text)
-                logger.info(f"  Page {i+1} merged: {len(page_text)} chars")
             else:
                 # Single column or unprocessed page, merge normally
                 for j, block in enumerate(page.text_blocks):
                     if block.text:
-                        logger.info(f"  Block {j+1}: '{block.text[:50]}...' (length: {len(block.text)})")
                         all_text.append(block.text)
                     else:
                         logger.warning(f"  Block {j+1}: empty text")
         
         merged_text = "\n\n".join(all_text)  # Use double newline to separate pages
-        logger.info(f"Final merged text length: {len(merged_text)}")
-        if merged_text:
-            logger.info(f"First 100 chars: '{merged_text[:100]}...'")
-        
+
         # Merge tables
         all_tables = []
         for page in pages:

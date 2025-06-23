@@ -52,23 +52,20 @@ class TextProcessor:
         )
         
         if has_multi_column:
-            # For multi-column pages, preserve the column structure
-            # Only clean individual text blocks, not the merged text
+            # For multi-column pages,只清理每个文本块的首尾空白和多余空格，保留换行
             for page in result.pages:
                 for block in page.text_blocks:
                     if block.text:
-                        # Clean individual text blocks but preserve line breaks
-                        block.text = ' '.join(block.text.split())
+                        # 只去除首尾空白和多余空格，保留换行
+                        block.text = '\n'.join(' '.join(line.strip().split()) for line in block.text.splitlines())
         else:
-            # For single column pages, clean the merged text normally
-            result.text = ' '.join(result.text.split())
-            
+            # For single column pages,同样保留换行
+            result.text = '\n'.join(' '.join(line.strip().split()) for line in result.text.splitlines())
             # Clean text blocks in each page
             for page in result.pages:
                 for block in page.text_blocks:
                     if block.text:
-                        block.text = ' '.join(block.text.split())
-        
+                        block.text = '\n'.join(' '.join(line.strip().split()) for line in block.text.splitlines())
         return result
     
     def _merge_hyphenated_words(self, result: ExtractionResult) -> ExtractionResult:

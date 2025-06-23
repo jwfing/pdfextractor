@@ -156,11 +156,9 @@ class PDFProcessor:
         try:
             # Use pdfplumber to extract text blocks
             chars = page.chars
-            logger.info(f"Found {len(chars) if chars else 0} characters on page")
             if not chars:
                 # If no character information, try to extract text
                 text = page.extract_text()
-                logger.info(f"Extracted text using extract_text(): {text[:200] if text else 'None'}")
                 if text:
                     text_objects.append(TextObject(
                         text=text,
@@ -169,7 +167,6 @@ class PDFProcessor:
                 return text_objects
             # Group characters by font and position (一行一组)
             char_groups = self._group_chars_by_font(chars)
-            logger.info(f"Grouped into {len(char_groups)} character groups")
             # 对每一行再按 x 坐标分割，适配多栏
             for i, group in enumerate(char_groups):
                 if not group:
@@ -182,6 +179,43 @@ class PDFProcessor:
                         continue
                     bbox = self._calculate_bbox(col_group)
                     font_info = self._extract_font_info(col_group[0])
+                    # 检查是否为超宽文本块（疑似跨两栏）
+                    block_width = bbox[2] - bbox[0]
+                    if block_width > page.width * 0.60 and len(col_group) > 10:
+                        # 尝试用 x 坐标聚类分成两栏
+                        xs = [char['x0'] for char in col_group]
+                        from sklearn.cluster import KMeans
+                        import numpy as np
+                        X = np.array(xs).reshape(-1, 1)
+                        try:
+                            kmeans = KMeans(n_clusters=2, random_state=0).fit(X)
+                            labels = kmeans.labels_
+                            left_chars = [char for char, label in zip(col_group, labels) if label == 0]
+                            right_chars = [char for char, label in zip(col_group, labels) if label == 1]
+                            # 按 x 坐标均值排序
+                            left_mean = np.mean([char['x0'] for char in left_chars]) if left_chars else 0
+                            right_mean = np.mean([char['x0'] for char in right_chars]) if right_chars else 0
+                            if left_mean > right_mean:
+                                left_chars, right_chars = right_chars, left_chars
+                            # 生成两个小块
+                            for sub_chars in [left_chars, right_chars]:
+                                if len(sub_chars) < 3:
+                                    continue
+                                sub_text = ''.join(char['text'] for char in sub_chars)
+                                sub_bbox = self._calculate_bbox(sub_chars)
+                                sub_font_info = self._extract_font_info(sub_chars[0])
+                                text_objects.append(TextObject(
+                                    text=sub_text,
+                                    bbox=sub_bbox,
+                                    font_size=sub_font_info.get('size'),
+                                    font_family=sub_font_info.get('fontname'),
+                                    is_bold=sub_font_info.get('is_bold', False),
+                                    is_italic=sub_font_info.get('is_italic', False)
+                                ))
+                            continue  # 跳过原始大块
+                        except Exception as e:
+                            logger.warning(f"[SPLIT] KMeans split failed: {e}")
+                    # 正常情况
                     text_objects.append(TextObject(
                         text=text,
                         bbox=bbox,
@@ -190,9 +224,6 @@ class PDFProcessor:
                         is_bold=font_info.get('is_bold', False),
                         is_italic=font_info.get('is_italic', False)
                     ))
-                    if i < 3 and col_idx < 2:  # 只打印前几组调试
-                        logger.info(f"Text object {i}-{col_idx}: '{text[:50]}...' at bbox {bbox}")
-            logger.info(f"Created {len(text_objects)} text objects")
         except Exception as e:
             logger.warning(f"Error extracting text objects: {e}")
         return text_objects
@@ -292,32 +323,90 @@ class PDFProcessor:
         
         return tables
     
-    def _split_line_by_columns(self, chars: list, page_width: float, min_gap_ratio: float = 0.12) -> list:
+    def _split_line_by_columns(self, chars: list, page_width: float, min_gap_ratio: float = 0.15) -> list:
         """将一行字符按 x 坐标分割为多列，适配多栏文档。min_gap_ratio 表示多大间隔才认为是分栏。"""
         if not chars:
             return []
+        
         # 按 x0 升序排列
         chars = sorted(chars, key=lambda c: c.get('x0', 0))
+        
+        # 如果字符数量很少，不需要分割
+        if len(chars) <= 3:
+            return [chars]
+        
         # 计算所有字符之间的间隔
         gaps = []
         for i in range(1, len(chars)):
             prev_x1 = chars[i-1].get('x1', 0)
             curr_x0 = chars[i].get('x0', 0)
             gaps.append(curr_x0 - prev_x1)
+        
         # 统计大间隔
-        min_gap = page_width * min_gap_ratio  # 比如 A4 宽度 600，0.12=72pt
+        min_gap = page_width * min_gap_ratio  # 比如 A4 宽度 600，0.15=90pt
+        
+        # 找到所有大间隔的位置
+        large_gaps = []
+        for idx, gap in enumerate(gaps):
+            if gap > min_gap:
+                large_gaps.append((idx, gap))
+        
+        # 添加调试信息
+        if len(chars) > 10:  # 只对较长的行进行调试
+            text = ''.join(char['text'] for char in chars)
+
+        # 如果没有大间隔，或者只有一个大间隔但间隔不够大，就不分割
+        if not large_gaps:
+            return [chars]
+        
+        # 如果只有一个大间隔，需要更严格的判断
+        if len(large_gaps) == 1:
+            gap_idx, gap_size = large_gaps[0]
+            # 如果间隔不够大（小于页面宽度的20%），或者分割后的文本块太小，就不分割
+            if gap_size < page_width * 0.20:
+                return [chars]
+            
+            # 检查分割后的文本块大小
+            left_chars = chars[:gap_idx+1]
+            right_chars = chars[gap_idx+1:]
+            
+            # 如果任一边的字符太少（少于2个），就不分割
+            if len(left_chars) < 2 or len(right_chars) < 2:
+                return [chars]
+            
+            # 检查分割后的文本内容是否合理
+            left_text = ''.join(char['text'] for char in left_chars).strip()
+            right_text = ''.join(char['text'] for char in right_chars).strip()
+            
+            # 如果任一边的文本太短（少于3个字符），就不分割
+            if len(left_text) < 3 or len(right_text) < 3:
+                return [chars]
+            
+            # 如果分割后的文本看起来像是一个完整的句子被错误分割，就不分割
+            # 检查是否包含常见的句子连接词
+            combined_text = left_text + ' ' + right_text
+            if any(connector in combined_text.lower() for connector in ['and', 'or', 'but', 'however', 'therefore', 'thus', 'hence']):
+                # 如果包含连接词，可能是被错误分割的句子
+                if len(combined_text) < 100:  # 如果合并后的文本不太长，就不分割
+                    return [chars]
+        
+        # 执行分割
         split_indices = [0]
         for idx, gap in enumerate(gaps):
             if gap > min_gap:
                 split_indices.append(idx+1)
         split_indices.append(len(chars))
+        
         # 按分割点切分
         column_groups = []
         for i in range(len(split_indices)-1):
             start = split_indices[i]
             end = split_indices[i+1]
             column_groups.append(chars[start:end])
-        return [g for g in column_groups if g]
+        
+        result = [g for g in column_groups if g]
+        
+        return result
     
     def _create_empty_page(self, page_num: int) -> PageData:
         """Create empty page data"""
@@ -328,4 +417,4 @@ class PDFProcessor:
             text_objects=[],
             images=[],
             tables=[]
-        ) 
+        )

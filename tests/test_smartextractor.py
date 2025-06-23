@@ -77,7 +77,25 @@ class TestSmartExtractor:
         logger.info(f"{pdf_file} read result: {context}")
         print(f"{pdf_file} read result: {context}")
         assert len(context) > 0
-        assert "This application is a continuation of , and hereby claims In some embodiments" not in context
+        assert "BATTERY WITH MULTIPLE JELLY ROLLS of conductive tabs extend through seals in the pouch to" not in context
+        assert "This application is a continuation of, and hereby claims In some embodiments" not in context
+
+
+    def test_single_column_pdf(self):
+        config = ExtractionConfig(
+            enable_ocr=False,
+            enable_layout_detection=True,
+            enable_image_processing=False,
+            language="en",
+            confidence_threshold=0.1,
+            remove_headers_footers=True
+        )
+        extractor = SmartExtractor(config)
+        pdf_file = "./examples/Asset Purchase Agreement, dated as of April 22, 2021, by and _ Skyworks Solutions _ Business Contracts _ Justia.pdf"
+        context = extractor.extract_text(str(pdf_file))
+        logger.info(f"{pdf_file} read result: {context}")
+        print(f"{pdf_file} read result: {context}")
+        assert len(context) > 0
 
 
     def test_read_pdf_file(self):
@@ -99,6 +117,7 @@ class TestSmartExtractor:
         for pdf_file in pdf_files:
             context = extractor.extract_text(str(pdf_file))
             logger.info(f"\t{pdf_file}: {context}")
+            assert len(context) > 0
 
 
 class TestExtractionConfig:
