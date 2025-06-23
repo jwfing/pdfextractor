@@ -153,12 +153,10 @@ class PDFProcessor:
     def _extract_text_objects(self, page) -> List[TextObject]:
         """Extract text objects"""
         text_objects = []
-        
         try:
             # Use pdfplumber to extract text blocks
             chars = page.chars
             logger.info(f"Found {len(chars) if chars else 0} characters on page")
-            
             if not chars:
                 # If no character information, try to extract text
                 text = page.extract_text()
@@ -169,43 +167,34 @@ class PDFProcessor:
                         bbox=[0, 0, page.width, page.height]
                     ))
                 return text_objects
-            
-            # Group characters by font and position
+            # Group characters by font and position (一行一组)
             char_groups = self._group_chars_by_font(chars)
             logger.info(f"Grouped into {len(char_groups)} character groups")
-            
+            # 对每一行再按 x 坐标分割，适配多栏
             for i, group in enumerate(char_groups):
                 if not group:
                     continue
-                
-                # Merge characters into text
-                text = ''.join(char['text'] for char in group)
-                if not text.strip():
-                    continue
-                
-                # Calculate bounding box
-                bbox = self._calculate_bbox(group)
-                
-                # Get font information
-                font_info = self._extract_font_info(group[0])
-                
-                text_objects.append(TextObject(
-                    text=text,
-                    bbox=bbox,
-                    font_size=font_info.get('size'),
-                    font_family=font_info.get('fontname'),
-                    is_bold=font_info.get('is_bold', False),
-                    is_italic=font_info.get('is_italic', False)
-                ))
-                
-                if i < 5:  # Log first 5 text objects for debugging
-                    logger.info(f"Text object {i}: '{text[:50]}...' at bbox {bbox}")
-            
+                # 按 x 坐标分割为多列
+                column_groups = self._split_line_by_columns(group, page.width)
+                for col_idx, col_group in enumerate(column_groups):
+                    text = ''.join(char['text'] for char in col_group)
+                    if not text.strip():
+                        continue
+                    bbox = self._calculate_bbox(col_group)
+                    font_info = self._extract_font_info(col_group[0])
+                    text_objects.append(TextObject(
+                        text=text,
+                        bbox=bbox,
+                        font_size=font_info.get('size'),
+                        font_family=font_info.get('fontname'),
+                        is_bold=font_info.get('is_bold', False),
+                        is_italic=font_info.get('is_italic', False)
+                    ))
+                    if i < 3 and col_idx < 2:  # 只打印前几组调试
+                        logger.info(f"Text object {i}-{col_idx}: '{text[:50]}...' at bbox {bbox}")
             logger.info(f"Created {len(text_objects)} text objects")
-                
         except Exception as e:
             logger.warning(f"Error extracting text objects: {e}")
-        
         return text_objects
     
     def _group_chars_by_font(self, chars) -> List[List[Dict]]:
@@ -302,6 +291,33 @@ class PDFProcessor:
             logger.warning(f"Error extracting tables: {e}")
         
         return tables
+    
+    def _split_line_by_columns(self, chars: list, page_width: float, min_gap_ratio: float = 0.12) -> list:
+        """将一行字符按 x 坐标分割为多列，适配多栏文档。min_gap_ratio 表示多大间隔才认为是分栏。"""
+        if not chars:
+            return []
+        # 按 x0 升序排列
+        chars = sorted(chars, key=lambda c: c.get('x0', 0))
+        # 计算所有字符之间的间隔
+        gaps = []
+        for i in range(1, len(chars)):
+            prev_x1 = chars[i-1].get('x1', 0)
+            curr_x0 = chars[i].get('x0', 0)
+            gaps.append(curr_x0 - prev_x1)
+        # 统计大间隔
+        min_gap = page_width * min_gap_ratio  # 比如 A4 宽度 600，0.12=72pt
+        split_indices = [0]
+        for idx, gap in enumerate(gaps):
+            if gap > min_gap:
+                split_indices.append(idx+1)
+        split_indices.append(len(chars))
+        # 按分割点切分
+        column_groups = []
+        for i in range(len(split_indices)-1):
+            start = split_indices[i]
+            end = split_indices[i+1]
+            column_groups.append(chars[start:end])
+        return [g for g in column_groups if g]
     
     def _create_empty_page(self, page_num: int) -> PageData:
         """Create empty page data"""

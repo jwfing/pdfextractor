@@ -209,6 +209,10 @@ class SmartExtractor:
         page_result = PageResult(page_number=page_num)
         
         try:
+            # Set page size first (before layout processing)
+            page_result.width = page_data.width
+            page_result.height = page_data.height
+            
             # 1. Extract text blocks
             text_blocks = self._extract_text_blocks(page_data)
             page_result.text_blocks = text_blocks
@@ -231,10 +235,6 @@ class SmartExtractor:
             if self.ocr_processor and self._needs_ocr(page_data):
                 ocr_blocks = self.ocr_processor.process_page(page_data, page_num)
                 page_result.text_blocks.extend(ocr_blocks)
-            
-            # Set page size
-            page_result.width = page_data.width
-            page_result.height = page_data.height
             
         except Exception as e:
             logger.error(f"Error processing page {page_num}: {e}")
@@ -285,14 +285,35 @@ class SmartExtractor:
         
         for i, page in enumerate(pages):
             logger.info(f"Page {i+1}: {len(page.text_blocks)} text blocks")
-            for j, block in enumerate(page.text_blocks):
-                if block.text:
-                    logger.info(f"  Block {j+1}: '{block.text[:50]}...' (length: {len(block.text)})")
-                    all_text.append(block.text)
-                else:
-                    logger.warning(f"  Block {j+1}: empty text")
+            
+            # Check if this page has been processed for multi-column layout
+            # If so, we need to preserve the column grouping
+            if hasattr(page, '_column_processed') and page._column_processed:
+                # Page has been processed for multi-column layout
+                # The text blocks are already in correct reading order (left column first, then right column)
+                # So we can directly merge them in order
+                page_text_blocks = []
+                for j, block in enumerate(page.text_blocks):
+                    if block.text:
+                        page_text_blocks.append(block.text)
+                        logger.info(f"  Block {j+1}: '{block.text[:50]}...' (length: {len(block.text)})")
+                    else:
+                        logger.warning(f"  Block {j+1}: empty text")
+                
+                # Join all text blocks from this page
+                page_text = "\n".join(page_text_blocks)
+                all_text.append(page_text)
+                logger.info(f"  Page {i+1} merged: {len(page_text)} chars")
+            else:
+                # Single column or unprocessed page, merge normally
+                for j, block in enumerate(page.text_blocks):
+                    if block.text:
+                        logger.info(f"  Block {j+1}: '{block.text[:50]}...' (length: {len(block.text)})")
+                        all_text.append(block.text)
+                    else:
+                        logger.warning(f"  Block {j+1}: empty text")
         
-        merged_text = "\n".join(all_text)
+        merged_text = "\n\n".join(all_text)  # Use double newline to separate pages
         logger.info(f"Final merged text length: {len(merged_text)}")
         if merged_text:
             logger.info(f"First 100 chars: '{merged_text[:100]}...'")

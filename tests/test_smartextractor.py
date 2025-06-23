@@ -69,14 +69,15 @@ class TestSmartExtractor:
             enable_layout_detection=True,
             language="en",
             confidence_threshold=0.1,
-            remove_headers_footers=False
+            remove_headers_footers=True
         )
         extractor = SmartExtractor(config)
-        pdf_file = "examples/patent2.pdf"
+        pdf_file = "./examples/patent22.pdf"
         context = extractor.extract_text(str(pdf_file))
         logger.info(f"{pdf_file} read result: {context}")
         print(f"{pdf_file} read result: {context}")
         assert len(context) > 0
+        assert "This application is a continuation of , and hereby claims In some embodiments" not in context
 
 
     def test_read_pdf_file(self):

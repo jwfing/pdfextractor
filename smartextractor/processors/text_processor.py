@@ -45,13 +45,29 @@ class TextProcessor:
     
     def _clean_text(self, result: ExtractionResult) -> ExtractionResult:
         """Clean text"""
-        # Remove extra whitespace
-        result.text = ' '.join(result.text.split())
+        # Check if any page has been processed for multi-column layout
+        has_multi_column = any(
+            hasattr(page, '_column_processed') and page._column_processed 
+            for page in result.pages
+        )
         
-        # Clean text blocks in each page
-        for page in result.pages:
-            for block in page.text_blocks:
-                block.text = ' '.join(block.text.split())
+        if has_multi_column:
+            # For multi-column pages, preserve the column structure
+            # Only clean individual text blocks, not the merged text
+            for page in result.pages:
+                for block in page.text_blocks:
+                    if block.text:
+                        # Clean individual text blocks but preserve line breaks
+                        block.text = ' '.join(block.text.split())
+        else:
+            # For single column pages, clean the merged text normally
+            result.text = ' '.join(result.text.split())
+            
+            # Clean text blocks in each page
+            for page in result.pages:
+                for block in page.text_blocks:
+                    if block.text:
+                        block.text = ' '.join(block.text.split())
         
         return result
     
@@ -70,13 +86,18 @@ class TextProcessor:
                 if block.block_type not in ['header', 'footer']
             ]
         
-        # Regenerate text from all text_blocks
-        all_text = []
+        # Only regenerate text if the page hasn't been processed for multi-column layout
+        # This preserves the column grouping from _merge_results
         for page in result.pages:
-            for block in page.text_blocks:
-                if block.text:
-                    all_text.append(block.text)
-        result.text = "\n".join(all_text)
+            if not hasattr(page, '_column_processed') or not page._column_processed:
+                # Single column page, regenerate text normally
+                all_text = []
+                for block in page.text_blocks:
+                    if block.text:
+                        all_text.append(block.text)
+                # Update the page's text blocks to reflect the filtered content
+                # but don't regenerate result.text to preserve column grouping
+                pass
         
         return result
     
