@@ -5,6 +5,7 @@ SmartExtractor - 智能PDF文本提取库
 """
 
 from .core import SmartExtractor
+from .adaptive_pdf_extractor import AdaptivePDFExtractor
 from .config import ExtractionConfig
 from .models import ExtractionResult, PageResult, TableResult, ImageResult
 from .exceptions import SmartExtractorError, PDFProcessingError, OCRError
@@ -15,6 +16,7 @@ __email__ = "your.email@example.com"
 
 __all__ = [
     "SmartExtractor",
+    "AdaptivePDFExtractor",
     "ExtractionConfig", 
     "ExtractionResult",
     "PageResult",
