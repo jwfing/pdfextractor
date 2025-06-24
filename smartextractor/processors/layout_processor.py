@@ -202,6 +202,7 @@ class LayoutProcessor:
         try:
             # 1. Use improved algorithm to analyze text block distribution and detect multi-column layout
             column_count = self._improve_column_detection(page_result)
+            print(f"column_count: {column_count}")
             if column_count <= 1:
                 # Single column layout, no need to reorder
                 return page_result

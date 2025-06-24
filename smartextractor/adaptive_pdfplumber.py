@@ -1,99 +1,134 @@
+import logging
+
 import pdfplumber
 import numpy as np
 from sklearn.cluster import KMeans
 import warnings
 
+from sklearn.metrics import silhouette_score
 
-def extract_text_from_multi_column_auto(page: pdfplumber.page.Page, n_columns: int = 2) -> str:
-    """
-    使用 K-Means 聚类算法自动检测并提取多栏页面的文本。
+logging.getLogger("pdfminer.pdfpage").setLevel(logging.ERROR)
 
-    Args:
-        page: 一个 pdfplumber.page.Page 对象。
-        n_columns: 希望检测的列数，默认为 2。
+class AdaptivePlumberExtractor:
+    def __init__(self):
+        self.min_words_limit = 20
+        self.silhouette_score_threshold = 0.5
+        self.column_threshold = 0.3  # 列间距阈值
 
-    Returns:
-        提取并正确排序后的文本。
-    """
-    # 1. 获取页面上的所有单词。使用单词比文本块更精细，效果更好。
-    # x_tolerance=3 允许多个字符被合并成一个单词
-    words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
-
-    if not words:
-        # 如果页面上没有单词，尝试用默认方法提取
-        return page.extract_text()
-
-    # 2. 计算每个单词的水平中心点
-    x_centers = np.array([(word['x0'] + word['x1']) / 2 for word in words]).reshape(-1, 1)
-
-    # 3. 使用 K-Means 算法寻找列的中心
-    # 抑制 scikit-learn 新版本中关于 n_init 的警告
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        kmeans = KMeans(n_clusters=n_columns, random_state=42, n_init=10).fit(x_centers)
-
-    # 4. 获取并排序聚类中心（即每列的中心线 x 坐标）
-    column_centers = sorted(kmeans.cluster_centers_.flatten())
-
-    # 5. 合理性检查：如果列中心靠得太近，可能实际上是单栏布局
-    # 我们定义一个最小间距，比如页面宽度的 10%
-    min_separation = page.width * 0.1
-    is_multi_column = True
-    for i in range(len(column_centers) - 1):
-        if (column_centers[i + 1] - column_centers[i]) < min_separation:
-            is_multi_column = False
-            break
-
-    if not is_multi_column:
-        print("布局检测为单栏，使用默认提取方式。")
-        # 对单栏布局，简单按垂直、水平位置排序即可
-        sorted_words = sorted(words, key=lambda w: (w['top'], w['x0']))
-        return " ".join(w['text'] for w in sorted_words)
-
-    print(f"布局检测为 {n_columns} 栏，开始处理...")
-
-    # 6. 定义列之间的分割点
-    # 分割点是相邻列中心的中点
-    split_points = [0] + [(column_centers[i] + column_centers[i + 1]) / 2 for i in range(len(column_centers) - 1)] + [
-        page.width]
-
-    # 7. 裁剪每一列并分别提取文本
-    all_text_columns = []
-    for i in range(n_columns):
-        # 定义当前列的裁剪框 (x0, top, x1, bottom)
-        col_bbox = (split_points[i], page.bbox[1], split_points[i + 1], page.bbox[3])
-
-        # 将页面裁剪成单列
-        column_page = page.crop(col_bbox)
-
-        # 在裁剪后的单列页面上提取文本
-        col_text = column_page.extract_text(x_tolerance=3, y_tolerance=3)
-
-        if col_text:
-            all_text_columns.append(col_text)
-
-    # 8. 按顺序合并所有列的文本
-    return "\n\n".join(all_text_columns)
+    def extract_text(self, pdf_path: str, max_columns: int = 2) -> str:
+        with pdfplumber.open(pdf_path) as pdf:
+            extract_texts = []
+#            for page in pdf.pages:
+            if pdf.pages and len(pdf.pages) > 0:
+                page = pdf.pages[0]
+                extract_texts.append(self._extract_text_from_multi_column_auto(page, max_columns))
+            return "\n\n".join(extract_texts)
 
 
-# --- 使用示例 ---
-# 确保在 'user_files' 目录下有一个多栏的 PDF 文件，例如 patent2.pdf
-pdf_path = "../examples/patent22.pdf"
+    def _extract_text_from_multi_column_auto(self, page: pdfplumber.page.Page, max_columns: int = 2) -> str:
+        """
+        使用 K-Means 聚类和轮廓系数自动检测并提取多栏页面的文本。
 
-try:
-    with pdfplumber.open(pdf_path) as pdf:
-        # 以第一页为例进行处理
-        first_page = pdf.pages[0]
+        Args:
+            page: 一个 pdfplumber.page.Page 对象。
+            max_columns: 考虑的最大列数，默认为 3。函数将自动从 1 到 max_columns 中选择最佳列数。
 
-        print(f"--- 正在使用自动列检测处理文件: {pdf_path} ---")
-        extracted_text = extract_text_from_multi_column_auto(first_page)
+        Returns:
+            提取并正确排序后的文本。
+        """
+        # 1. 获取单词
+        words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
 
-        print("\n--- 提取结果 ---")
-        print(extracted_text)
+        if not words:
+            return page.extract_text() or ""
 
-except FileNotFoundError:
-    print(f"错误: 文件未找到 {pdf_path}")
-except ImportError:
-    print("错误: 请确保已安装 scikit-learn 和 numpy (`pip install scikit-learn numpy`)")
-except Exception as e:
-    print(f"处理过程中发生错误: {e}")
+        # 如果单词太少，很可能是单栏或者空页面，直接默认处理
+        if len(words) < self.min_words_limit:
+            print("单词数量过少，使用默认单栏提取方式。")
+            # 使用 extract_text 并设置容差，比手动排序单词更稳健
+            return page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+
+        # 2. 准备聚类数据
+        x_centers = np.array([(word['x0'] + word['x1']) / 2 for word in words]).reshape(-1, 1)
+
+        # 3. 寻找最佳列数 (k)
+        # 我们测试从 2 到 max_columns 的每一种可能性，并用轮廓系数评估效果。
+        # 轮廓系数不能用于 k=1 的情况，所以我们从 k=2 开始。
+        scores = {}
+        # 确保测试的列数不超过 (单词数 - 1)
+        actual_max_columns = min(max_columns, len(x_centers) - 1)
+
+        if actual_max_columns >= 2:
+            for k in range(2, actual_max_columns + 1):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10).fit(x_centers)
+
+                # 确保形成了多个簇，才能计算轮廓系数
+                if len(set(kmeans.labels_)) > 1:
+                    score = silhouette_score(x_centers, kmeans.labels_)
+                    scores[k] = score
+                    print(f"测试 {k} 栏布局, 轮廓系数: {score:.4f}")
+                else:
+                    # 如果所有点都被分到同一个簇，说明不适合多栏
+                    scores[k] = -1  # 给一个很差的分数
+
+        # 如果没有任何多栏布局得分，或者最高分很低，我们倾向于它是单栏
+        # 这里我们选择得分最高的 k 值作为候选
+        if scores:
+            best_k = max(scores, key=scores.get)
+            # 如果最高分都小于0，说明聚类效果很差，很可能是单栏
+            if scores[best_k] < self.silhouette_score_threshold:  # 可以调整这个阈值
+                best_k = 1
+        else:
+            best_k = 1
+
+        # 4. 如果最佳候选是单栏，直接按单栏处理
+        if best_k == 1:
+            print("布局检测为单栏，使用默认提取方式。")
+            sorted_words = sorted(words, key=lambda w: (w['top'], w['x0']))
+            return " ".join(w['text'] for w in sorted_words)
+
+        # 5. 对最佳的多栏候选 (best_k > 1)，进行最终的合理性检查
+        print(f"最佳列数候选: {best_k}，进行合理性检查...")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            kmeans = KMeans(n_clusters=best_k, random_state=42, n_init=10).fit(x_centers)
+
+        column_centers = sorted(kmeans.cluster_centers_.flatten())
+        print(f"column_centers: {column_centers}")
+        # 检查列中心是否靠得太近
+        min_separation = page.width * self.column_threshold
+        print(f"min_separation: {min_separation}")
+
+        is_well_separated = True
+        if len(column_centers) > 1:
+            for i in range(len(column_centers) - 1):
+                if (column_centers[i + 1] - column_centers[i]) < min_separation:
+                    is_well_separated = False
+                    break
+        else:
+            is_well_separated = False
+
+        # 如果检查不通过，回退到单栏模式
+        if not is_well_separated:
+            print("多栏检测结果不显著 (列间距过小)，回退至单栏提取方式。")
+            sorted_words = sorted(words, key=lambda w: (w['top'], w['x0']))
+            return " ".join(w['text'] for w in sorted_words)
+
+        # 6. 如果所有检查都通过，则按检测到的多栏布局进行处理
+        n_columns = best_k
+        print(f"布局检测为 {n_columns} 栏，开始处理...")
+
+        split_points = [0] + [(column_centers[i] + column_centers[i + 1]) / 2 for i in range(len(column_centers) - 1)] + [
+            page.width]
+
+        all_text_columns = []
+        for i in range(n_columns):
+            col_bbox = (split_points[i], page.bbox[1], split_points[i + 1], page.bbox[3])
+            column_page = page.crop(col_bbox)
+            col_text = column_page.extract_text(x_tolerance=3, y_tolerance=3)
+            if col_text:
+                all_text_columns.append(col_text)
+
+        return "\n\n".join(all_text_columns)

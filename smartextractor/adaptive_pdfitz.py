@@ -8,7 +8,7 @@ import warnings  # Import warnings to suppress KMeans warnings
 
 logger = logging.getLogger(__name__)
 
-class AdaptivePDFExtractor:
+class AdaptiveFitzExtractor:
     def __init__(self):
         self.column_threshold = 0.3  # 列间距阈值
         self.min_column_width = 0.25  # 最小列宽比例
@@ -18,7 +18,9 @@ class AdaptivePDFExtractor:
         doc = fitz.open(pdf_path)
         full_text = []
 
-        for page_num in range(doc.page_count):
+        # for page_num in range(doc.page_count):
+        if doc.page_count > 0:
+            page_num = 0
             page = doc[page_num]
             page_text = self._extract_page_text(page)
             if page_text:
@@ -37,6 +39,7 @@ class AdaptivePDFExtractor:
         # 检测布局类型
         layout_type = self._detect_layout_type(blocks, page.rect.width)
         logger.debug(f"layout_type: {layout_type}")
+        print(f"layout_type: {layout_type}")
 
         if layout_type == "single_column":
             return self._extract_single_column(blocks)
@@ -248,5 +251,5 @@ class AdaptivePDFExtractor:
 
 # 使用示例
 def extract_adaptive_text(pdf_path: str) -> str:
-    extractor = AdaptivePDFExtractor()
+    extractor = AdaptiveFitzExtractor()
     return extractor.extract_text(pdf_path)

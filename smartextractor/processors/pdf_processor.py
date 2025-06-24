@@ -76,7 +76,10 @@ class PDFProcessor:
                     
                     # Process each page
                     pages = []
-                    for page_num, page in enumerate(pdf.pages, 1):
+                    if pdf.pages:
+                        page_num = 0
+                        page = pdf.pages[0]
+                    # for page_num, page in enumerate(pdf.pages, 1):
                         try:
                             page_data = self._process_page(page, page_num)
                             pages.append(page_data)

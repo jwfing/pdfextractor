@@ -1,6 +1,6 @@
 # PDF processor
-PyPDF2>=3.0.0
-pdfplumber>=0.8.0
+PyPDF2~=3.0.1
+pdfplumber>=0.11.6
 pdf2image>=1.16.0
 pymupdf>=1.26.1
 
@@ -11,8 +11,9 @@ pytesseract>=0.3.10
 easyocr>=1.6.0
 
 # Machine Learning and AI
-numpy>=1.21.0
-scikit-learn>=1.0.0
+numexpr~=2.11.0
+numpy>=2.2.6
+scikit-learn>=1.7.0
 tensorflow>=2.8.0
 torch>=1.12.0
 transformers>=4.20.0
