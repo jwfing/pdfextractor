@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 def test_extract_two_columns_pdf():
     extractor = AdaptiveFitzExtractor()
-    pdf_file = Path(__file__).parent.parent / "examples/patent2.pdf"
+    pdf_file = Path(__file__).parent.parent / "examples/patent22.pdf"
     context = extractor.extract_text(str(pdf_file))
     logger.info(f"{pdf_file} read result: {len(context)}")
     assert len(context) > 0

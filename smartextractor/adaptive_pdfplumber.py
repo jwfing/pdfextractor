@@ -1,4 +1,6 @@
 import logging
+import math
+from typing import List
 
 import pdfplumber
 import numpy as np
@@ -18,11 +20,30 @@ class AdaptivePlumberExtractor:
     def extract_text(self, pdf_path: str, max_columns: int = 2) -> str:
         with pdfplumber.open(pdf_path) as pdf:
             extract_texts = []
+            double_column_layout = self._is_multi_column_layout(pdf.pages)
+            max_columns = 2 if double_column_layout else 1
+            print(f"Recognized multi-column layout: {double_column_layout}, max_columns: {max_columns}")
 #            for page in pdf.pages:
             if pdf.pages and len(pdf.pages) > 0:
                 page = pdf.pages[0]
                 extract_texts.append(self._extract_text_from_multi_column_auto(page, max_columns))
             return "\n\n".join(extract_texts)
+
+
+    def _is_multi_column_layout(self, pages: List[pdfplumber.page.Page]) -> bool:
+        num_pages = len(pages)
+        target_num = 3
+        if num_pages <= 1:
+            target_num = 0
+        elif num_pages <= 4:
+            target_num = math.ceil(num_pages / 2)
+        try:
+            is_double_column = bool(pages[target_num].extract_table(dict(vertical_strategy='text', text_tolerance=12)))
+            print(f"num_pages: {num_pages}, target_num: {target_num}, is_double_column: {is_double_column}")
+        except Exception as e:
+            print(f"error : {str(e)}")
+            is_double_column = False
+        return is_double_column
 
 
     def _extract_text_from_multi_column_auto(self, page: pdfplumber.page.Page, max_columns: int = 2) -> str:
@@ -39,7 +60,7 @@ class AdaptivePlumberExtractor:
         # 1. 获取单词
         words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
 
-        if not words:
+        if not words or max_columns < 2:
             return page.extract_text() or ""
 
         # 如果单词太少，很可能是单栏或者空页面，直接默认处理

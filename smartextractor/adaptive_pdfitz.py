@@ -32,7 +32,7 @@ class AdaptiveFitzExtractor:
     def _extract_page_text(self, page) -> str:
         """提取单页文本"""
         # 获取文本块
-        blocks = self._get_text_blocks(page)
+        blocks = self._get_line_text_blocks(page)#_get_text_blocks(page)
         if not blocks:
             return ""
 
@@ -45,6 +45,35 @@ class AdaptiveFitzExtractor:
             return self._extract_single_column(blocks)
         else:
             return self._extract_multi_column(blocks, page.rect.width)
+
+    def _get_line_text_blocks(self, page) -> List[Dict]:
+        """获取并处理文本块"""
+        line_blocks = []
+        text_dict = page.get_text("dict")
+
+        for block in text_dict["blocks"]:
+            if "lines" not in block:
+                continue
+
+            for line in block["lines"]:
+                # 使用 join 来高效地合并行内所有 span 的文本
+                line_text = "".join(span["text"] for span in line["spans"])
+
+                # 只有当行文本非空时才处理
+                if line_text.strip():
+                    bbox = line["bbox"]
+                    line_blocks.append({
+                        'text': line_text.strip(),
+                        'bbox': bbox,
+                        'x0': bbox[0],
+                        'y0': bbox[1],
+                        'x1': bbox[2],
+                        'y1': bbox[3],
+                        'width': bbox[2] - bbox[0],
+                        'height': bbox[3] - bbox[1]
+                    })
+
+        return line_blocks
 
     def _get_text_blocks(self, page) -> List[Dict]:
         """获取并处理文本块"""
@@ -92,7 +121,14 @@ class AdaptiveFitzExtractor:
         # 只有当_detect_columns_kmeans明确检测到两列时，才认为它是多列
         if len(column_centers) >= 2:
             # 检查是否有明显的列间距 (这个检查可以作为辅助，但主要依赖聚类结果)
-            if self._has_clear_column_gap(blocks, page_width):
+            center_distance = abs(column_centers[1] - column_centers[0])
+            left_distance = abs(page_width/2 - column_centers[0])
+            right_distance = abs(page_width/2 - column_centers[1])
+            ratio_distance = min(left_distance, right_distance) / max(left_distance, right_distance)
+            # 列中心距离应大于页面宽度的30%才认为是两列
+            if center_distance > page_width * 0.3 and ratio_distance > 0.3:
+                return "multi_column"
+            elif self._has_clear_column_gap(blocks, page_width):
                 return "multi_column"
             else:
                 # 如果聚类检测到两列但没有明显的物理间距，可能不是标准双栏
