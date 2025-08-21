@@ -4,6 +4,8 @@ pdfplumber>=0.11.6
 pdf2image>=1.16.0
 pymupdf>=1.26.1
 
+layoutparser~=0.3.4
+
 # OCR
 Pillow>=9.0.0
 opencv-python>=4.5.0
